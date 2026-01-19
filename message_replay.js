@@ -1,11 +1,18 @@
 /*:
- * @plugindesc 消息回放窗口（在地图中按 Tab 使用）
+ * @plugindesc 消息回放窗口（在地图中按指定快捷键使用）
  * @author Errno
  * @help 
- * 前置插件：无
- */
+ *
+ * @param key
+ * @type string
+ * @desc 调用消息回放窗口的按键
+ * @default tab
+*/
 
 (function(){
+	var pluginParameters = PluginManager.parameters('message_replay');
+    var inputKeyCallMessageReplay = pluginParameters['key'] || 'tab';
+
     /**
      * MomentumScroller
      * 
@@ -222,8 +229,24 @@
                 break;
             case 1:
                 // choice
-                var hasCancel = message.cancelType < -1;
-                ty += (this.contents.fontSize + 8) * (message.choices.length + (hasCancel ? 1 : 0));
+                var choices = message.choices.slice(), hasCancel = message.cancelType < -1;
+                var choicePadding = 16, maxSize = this.contents.width - 2 * this._padding - choicePadding, choiceLayers = [], choiceBuf = [], currentSize = 0;
+                if (hasCancel) {
+                    choices.push("(取消)");
+                }
+                choices.forEach((element, index) => {
+                    var textWidth = this.textWidth(element), color = this.textColor(0);
+                    if ((currentSize += textWidth + choicePadding) > maxSize) {
+                        choiceLayers.push(choiceBuf);
+                        choiceBuf = [];
+                        currentSize = textWidth + choicePadding;
+                    }
+                    choiceBuf.push(textWidth);
+                });
+                if (choiceBuf.length > 0) {
+                    choiceLayers.push(choiceBuf);
+                }
+                ty += choiceLayers.length * (this.contents.fontSize + 8);
                 break;
             case 2:
                 // number input
@@ -231,7 +254,6 @@
                 break;
             case 3:
                 // item choice
-                tx = this.contents.width - x, ty = y;
                 var item = message.itemId ? $dataItems[message.itemId] : null;
                 if (item) {
                     ty += Math.max(Window_Base._iconHeight + 4, this.contents.fontSize) + 8;
@@ -252,7 +274,7 @@
             case 0:
                 // text message
                 var _imageReservationId = Utils.generateRuntimeId(), faceBitmap = ImageManager.reserveFace(message.params[0], 0, this._imageReservationId);
-                if (faceBitmap && faceBitmap.isReady()) {
+                if (faceBitmap && faceBitmap.isReady() && faceBitmap._image) {
                     this.drawFace(message.params[0], message.params[1], x, y);
                     ImageManager.releaseReservation(_imageReservationId);
                     tx = x += 168;
@@ -291,39 +313,48 @@
                 if (!trailing) {
                     ty += maxFontSize + 8;
                 }
-                if (faceBitmap && faceBitmap.isReady()) {
+                if (faceBitmap && faceBitmap.isReady() && faceBitmap._image) {
                     ty = Math.max(ty, y + Window_Base._faceHeight + 8);
                 }
                 break;
             case 1:
                 // choice
                 var choices = message.choices.slice(), hasCancel = message.cancelType < -1;
+                var choicePadding = 16, maxSize = this.contents.width - 2 * x - choicePadding, choiceLayers = [], choiceBuf = [], currentSize = 0;
                 if (hasCancel) {
                     choices.push("(取消)");
                 }
                 choices.forEach((element, index) => {
-                    var left = x, right = this.contents.width - x, textWidth = this.textWidth(element);
-                    switch (message.position) {
-                        case 0: // left
-                            tx = x;
-                            break;
-                        case 1: // middle
-                            tx = (this.contents.width - textWidth) / 2;
-                            break;
-                        case 2: // right
-                            tx = right - textWidth;
-                            break;
+                    var textWidth = this.textWidth(element), color = this.textColor(0);
+                    if ((currentSize += textWidth + choicePadding) > maxSize) {
+                        choiceLayers.push(choiceBuf);
+                        choiceBuf = [];
+                        currentSize = textWidth + choicePadding;
                     }
                     if (index == message.choiceIndex || (hasCancel && index == choices.length - 1 && message.isCancel)) {
-                        this.changeTextColor(this.systemColor());
+                        color = this.systemColor();
                     }
                     else if (hasCancel && index == choices.length - 1) {
-                        this.changeTextColor(this.textColor(8));
+                        color = this.textColor(8);
                     }
-                    else {
-                        this.resetTextColor();
-                    }
-                    this.drawText(element, tx, ty, textWidth, this.lineHeight(), 'left');
+                    choiceBuf.push({choice: element, color: color, width: textWidth});
+                });
+                if (choiceBuf.length > 0) {
+                    choiceLayers.push(choiceBuf);
+                }
+                choiceLayers.forEach((layer) => {
+                    var totalWidth = choicePadding * (layer.length + 1), span = 0, tx = x + choicePadding;
+                    layer.forEach((element) => {
+                        totalWidth += element.width + choicePadding;
+                    });
+                    span = (this.contents.width - totalWidth - choicePadding - 2 * x) / layer.length;
+                    console.log(span);
+                    layer.forEach((element) => {
+                        this.changeTextColor(element.color);
+                        this.drawText(element.choice, tx + (element.width + span) / 2, ty, element.width, this.lineHeight(), 'left');
+                        tx += element.width + choicePadding + span;
+                        console.log(tx);
+                    });
                     ty += this.contents.fontSize + 8;
                 });
                 break;
@@ -340,7 +371,7 @@
                 var item = message.itemId ? $dataItems[message.itemId] : null, itemName = item ? item.name : "(取消)";
                 var iconWidth = Window_Base._iconWidth + 4, textWidth = this.textWidth(itemName);
                 if (item) {
-                    this.drawItemName(item, tx - textWidth - iconWidth, ty);
+                    this.drawItemName(item, tx - textWidth - iconWidth, ty + 2);
                     ty += Math.max(Window_Base._iconHeight + 4, this.contents.fontSize) + 8;
                 } else {
                     this.drawText(itemName, tx - textWidth, ty, textWidth, this.lineHeight(), 'left');
@@ -449,7 +480,7 @@
     
     Window_MessageReplay.prototype.updateInput = function() {
         if (this.isOpen()) {
-            if (Input.isTriggered('cancel') || Input.isTriggered('tab')) {
+            if (Input.isTriggered('cancel') || Input.isTriggered(inputKeyCallMessageReplay)) {
                 Input.update();
                 this.terminate();
                 return true;
@@ -484,7 +515,7 @@
     
     Window_MessageReplay.prototype.canStart = function() {
         if (!this.isOpen() && $gamePlayer.canMove() && !$gameMessage.isBusy()) {
-            return Input.isTriggered('tab');
+            return Input.isTriggered(inputKeyCallMessageReplay);
         }
     }
     
