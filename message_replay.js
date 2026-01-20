@@ -32,7 +32,12 @@
  * @type boolean
  * @desc 选择项是否启用闪烁效果
  * @default true
-*/
+ *
+ * @param strictMasking
+ * @type boolean
+ * @desc 是否使用严格的遮罩效果（窗口展开时的显示会略有不同）
+ * @default false
+ */
 
 (function(){
 	var pluginParameters = PluginManager.parameters('message_replay');
@@ -42,6 +47,7 @@
     var paramEnableSave = (pluginParameters['enableSave'] || 'true') === 'true';
     var paramUseDarkBackground = (pluginParameters['darkBackground'] || 'true') === 'true';
     var paramChoiceBlinking = (pluginParameters['choiceBlinking'] || 'true') === 'true';
+    var paramStrictMasking = (pluginParameters['strictMasking'] || 'false') === 'true';
 
     /**
      * MomentumScroller
@@ -502,6 +508,103 @@
     }
     
     /**
+     * WindowLayer_Mask
+     * 
+     * 用于实现遮罩效果的窗口层类
+     */
+    function WindowLayer_Mask() {
+        this.initialize.apply(this, arguments);
+    }
+    WindowLayer_Mask.prototype = Object.create(WindowLayer.prototype);
+    WindowLayer_Mask.prototype.constructor = WindowLayer_Mask;
+
+    WindowLayer_Mask.prototype.initialize = function(left_padding, top_padding, right_padding, bottom_padding) {
+        WindowLayer.prototype.initialize.call(this);
+        this.left_padding = left_padding || 0;
+        this.top_padding = top_padding || 0;
+        this.right_padding = right_padding || 0;
+        this.bottom_padding = bottom_padding || 0;
+        this._realX = null;
+        this._realY = null;
+        this.openness = 255;
+    }
+
+    WindowLayer_Mask.prototype.renderWebGL = function(renderer) {
+        if (!this.visible || !this.renderable) {
+            return;
+        }
+    
+        if (this.children.length==0) {
+            return;
+        }
+    
+        renderer.flush();
+        this.filterArea.copy(this);
+        renderer.filterManager.pushFilter(this, this.filters);
+        renderer.currentRenderer.start();
+    
+        var shift = new PIXI.Point();
+        var rt = renderer._activeRenderTarget;
+        var projectionMatrix = rt.projectionMatrix;
+        shift.x = Math.round((projectionMatrix.tx + 1) / 2 * rt.sourceFrame.width);
+        shift.y = Math.round((projectionMatrix.ty + 1) / 2 * rt.sourceFrame.height);
+    
+        var x = this.x, y = this.y, parent = this.parent;
+        while (parent) {
+            x += parent.x;
+            y += parent.y;
+            parent = parent.parent;
+        }
+        this._realX = x, this._realY = y;
+
+        for (var i = 0; i < this.children.length; i++) {
+            var child = this.children[i];
+            if (child._isWindow && child.visible && child.openness > 0) {
+                this._maskWindow(child, shift);
+                renderer.maskManager.pushScissorMask(this, this._windowMask);
+                renderer.clear();
+                renderer.maskManager.popScissorMask();
+                this._maskCanvas(shift);
+                renderer.maskManager.pushScissorMask(this, this._windowMask);
+                renderer.currentRenderer.start();
+                child.renderWebGL(renderer);
+                renderer.currentRenderer.flush();
+                renderer.maskManager.popScissorMask();
+            }
+        }
+    
+        renderer.flush();
+        renderer.filterManager.popFilter();
+        renderer.maskManager.popScissorMask();
+    
+        for (var j = 0; j < this.children.length; j++) {
+            if (!this.children[j]._isWindow) {
+                this.children[j].renderWebGL(renderer);
+            }
+        }
+    };
+
+    WindowLayer.prototype._maskWindow = function(window, shift) {
+        this._windowMask._currentBounds = null;
+        this._windowMask.boundsDirty = true;
+        var rect = this._windowRect;
+        rect.x = this._realX + shift.x + window.x;
+        rect.y = this._realY + shift.y + window.y + window.height / 2 * (1 - window._openness / 255);
+        rect.width = window.width;
+        rect.height = window.height * window._openness / 255;
+    };
+
+    WindowLayer_Mask.prototype._maskCanvas = function(shift) {
+        this._windowMask._currentBounds = null;
+        this._windowMask.boundsDirty = true;
+        var rect = this._windowRect, yClip = (255 - this.openness) / 255 * (this.height / 2);
+        rect.x = this._realX + shift.x + this.left_padding;
+        rect.y = this._realY + shift.y + Math.max(this.top_padding, yClip);
+        rect.width = this.width - this.left_padding - this.right_padding;
+        rect.height = this.height - Math.max(this.top_padding, yClip) - Math.max(this.bottom_padding, yClip);
+    }
+
+    /**
      * Window_MessageReplay
      * 
      * 用于显示消息回放窗口的类
@@ -512,7 +615,7 @@
     Window_MessageReplay.prototype = Object.create(Window_Base.prototype);
     Window_MessageReplay.prototype.constructor = Window_MessageReplay;
     
-    Window_MessageReplay.prototype.initialize = function(x, y, width, height) {
+    Window_MessageReplay.prototype.initialize = function(x, y, width, height, padding=24) {
         x = x || 0
         this.baseY = y || 0
         width = width || Graphics.boxWidth;
@@ -528,7 +631,10 @@
         this.scrollY = 0;
         this._contentsHeight = 0;
         this._momentumScroller = null;
-        this.addChild(this._dotWindow);
+        this._windowLayer = new WindowLayer_Mask(0, padding, 0, padding);
+        this._windowLayer.move(0, 0, this.width, this.height);
+        this.addChild(this._windowLayer)
+        this._windowLayer.addChild(this._dotWindow);
         this.refresh();
     };
 
@@ -546,6 +652,7 @@
         if (this.isOpening() || this.isClosing()) {
             this._setWindowsPosition();
         }
+        this._windowLayer.openness = paramStrictMasking ? this.openness : 255;
         Window_Base.prototype.update.call(this);
         while (!this.isOpening() && !this.isClosing()) {
             if (this.updateInput()) {
@@ -637,10 +744,10 @@
             } else {
                 var tagWindow = new Window_MessageTag(message, this.width, 18, 18);
                 this._tagWindows[message.id] = tagWindow;
-                this.addChild(tagWindow);
+                this._windowLayer.addChild(tagWindow);
                 lastDivider = new Window_MessageTag({type: 4}, this.contentsWidth(), 0);
                 this._dividerWindows[message.id] = lastDivider;
-                this.addChild(lastDivider);
+                this._windowLayer.addChild(lastDivider);
                 updated = true;
             }
             tagWindow.opacity = 255;
@@ -655,8 +762,8 @@
         });
         for (var id in tagWindows) {
             var tagWindow = tagWindows[id], dividerWindow = this._dividerWindows[id];
-            this.removeChild(tagWindow);
-            this.removeChild(dividerWindow);
+            this._windowLayer.removeChild(tagWindow);
+            this._windowLayer.removeChild(dividerWindow);
             delete this._tagWindows[id];
             delete this._dividerWindows[id];
             updated = true;
