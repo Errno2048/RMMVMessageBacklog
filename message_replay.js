@@ -22,6 +22,11 @@
  * @type boolean
  * @desc 是否在存档中保存消息回放内容
  * @default true
+ *
+ * @param darkBackground
+ * @type boolean
+ * @desc 消息回放窗口是否使用暗色背景
+ * @default true
 */
 
 (function(){
@@ -30,6 +35,7 @@
     var paramChoiceCancelText = pluginParameters['cancelText'] || '(取消)';
     var paramMessageReplayCapacity = Number(pluginParameters['capacity'] || 100);
     var paramEnableSave = (pluginParameters['enableSave'] || 'true') === 'true';
+    var paramUseDarkBackground = (pluginParameters['darkBackground'] || 'true') === 'true';
 
     /**
      * MomentumScroller
@@ -765,6 +771,9 @@
     Scene_Map.prototype.createAllWindows = function() {
         _sceneMap_createAllWindows.call(this);
         this._messageReplayWindow = new Window_MessageReplay(0, -24, Graphics.boxWidth, Graphics.boxHeight + 48);
+        if (paramUseDarkBackground) {
+            this._messageReplayWindow.setBackgroundType(1);
+        }
         this.addWindow(this._messageReplayWindow);
     };
     
