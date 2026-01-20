@@ -7,11 +7,29 @@
  * @type string
  * @desc 调用消息回放窗口的按键
  * @default tab
+ *
+ * @param capacity
+ * @type number
+ * @desc 消息回放的容量
+ * @default 100
+ *
+ * @param cancelText
+ * @type string
+ * @desc 选择项中取消选项的显示文本
+ * @default (取消)
+ *
+ * @param enableSave
+ * @type boolean
+ * @desc 是否在存档中保存消息回放内容
+ * @default true
 */
 
 (function(){
 	var pluginParameters = PluginManager.parameters('message_replay');
-    var inputKeyCallMessageReplay = pluginParameters['key'] || 'tab';
+    var paramInputKeyCallMessageReplay = pluginParameters['key'] || 'tab';
+    var paramChoiceCancelText = pluginParameters['cancelText'] || '(取消)';
+    var paramMessageReplayCapacity = Number(pluginParameters['capacity'] || 100);
+    var paramEnableSave = (pluginParameters['enableSave'] || 'true') === 'true';
 
     /**
      * MomentumScroller
@@ -193,7 +211,46 @@
         var height = this._getHeight();
         this.height = height + 2 * this.standardPadding();
         this.contents = new Bitmap(this.contentsWidth(), this.contentsHeight());
+        this._faceReservationId = null;
+        this._faceBitmap = null;
+        this._loadMessageFace();
         this.refresh();
+    }
+
+    Window_MessageTag.prototype.update = function() {
+        Window_Base.prototype.update.call(this);
+        while (!this.isOpening() && !this.isClosing()) {
+            if (this._drawFace()) {
+                return;
+            } else {
+                return;
+            }
+        }
+    }
+
+    Window_MessageTag.prototype._loadMessageFace = function() {
+        if (this._message.type !== 0) {
+            return;
+        }
+        var hasFace = this._message.params[0] && this._message.params[0] !== "";
+        if (!hasFace) {
+            return;
+        }
+        this._faceReservationId = Utils.generateRuntimeId();
+        this._faceBitmap = ImageManager.reserveFace(this._message.params[0], 0, this._imageReservationId);
+    }
+
+    Window_MessageTag.prototype._drawFace = function() {
+        if (this._faceReservationId && this._faceBitmap) {
+            if (this._faceBitmap.isReady()) {
+                this.drawFace(this._message.params[0], this._message.params[1], this._xPadding, 0);
+                this._faceReservationId = null;
+                this._faceBitmap = null;
+                return false;
+            }
+            return true;
+        }
+        return false;
     }
 
     Window_MessageTag.prototype.standardPadding = function() {
@@ -241,7 +298,7 @@
                 var choices = message.choices.slice(), hasCancel = message.cancelType < -1;
                 var choicePadding = 16, maxSize = this.contents.width - 2 * this._windowPadding - choicePadding, choiceLayers = [], choiceBuf = [], currentSize = 0;
                 if (hasCancel) {
-                    choices.push("(取消)");
+                    choices.push(paramChoiceCancelText);
                 }
                 choices.forEach((element, index) => {
                     var textWidth = this.textWidth(element), color = this.textColor(0);
@@ -289,10 +346,9 @@
         switch (message.type) {
             case 0:
                 // text message
-                var _imageReservationId = Utils.generateRuntimeId(), faceBitmap = ImageManager.reserveFace(message.params[0], 0, this._imageReservationId);
-                if (faceBitmap && faceBitmap.isReady() && faceBitmap._image) {
-                    this.drawFace(message.params[0], message.params[1], x, y);
-                    ImageManager.releaseReservation(_imageReservationId);
+                var hasFace = message.params[0] && message.params[0] !== "";
+                if (hasFace) {
+                    this._drawFace();
                     tx = x += 168;
                 }
                 var trailing = true, maxFontSize = this.contents.fontSize;
@@ -329,7 +385,7 @@
                 if (!trailing) {
                     ty += maxFontSize + 8;
                 }
-                if (faceBitmap && faceBitmap.isReady() && faceBitmap._image) {
+                if (hasFace) {
                     ty = Math.max(ty, y + Window_Base._faceHeight + 8);
                 }
                 break;
@@ -338,7 +394,7 @@
                 var choices = message.choices.slice(), hasCancel = message.cancelType < -1;
                 var choicePadding = 16, maxSize = this.contents.width - 2 * x - choicePadding, choiceLayers = [], choiceBuf = [], currentSize = 0;
                 if (hasCancel) {
-                    choices.push("(取消)");
+                    choices.push(paramChoiceCancelText);
                 }
                 choices.forEach((element, index) => {
                     var textWidth = this.textWidth(element), color = this.textColor(0);
@@ -383,7 +439,7 @@
             case 3:
                 // item choice
                 tx = this.contents.width - x, ty = y;
-                var item = message.itemId ? $dataItems[message.itemId] : null, itemName = item ? item.name : "(取消)";
+                var item = message.itemId ? $dataItems[message.itemId] : null, itemName = item ? item.name : paramChoiceCancelText;
                 var iconWidth = Window_Base._iconWidth + 4, textWidth = this.textWidth(itemName);
                 if (item) {
                     this.drawItemName(item, tx - textWidth - iconWidth, ty + 2);
@@ -451,6 +507,7 @@
         this._lastDividerId = null;
         this._dotWindow = new Window_MessageTag({type: 5}, this.contentsWidth(), 0);
         this._dotWindow.x = this.standardPadding();
+        this._dotWindow.visible = false;
         this.scrollY = 0;
         this._contentsHeight = 0;
         this._momentumScroller = null;
@@ -501,7 +558,7 @@
     
     Window_MessageReplay.prototype.updateInput = function() {
         if (this.isOpen()) {
-            if (Input.isTriggered('cancel') || Input.isTriggered(inputKeyCallMessageReplay)) {
+            if (Input.isTriggered('cancel') || Input.isTriggered(paramInputKeyCallMessageReplay)) {
                 Input.update();
                 this.terminate();
                 return true;
@@ -536,7 +593,7 @@
     
     Window_MessageReplay.prototype.canStart = function() {
         if (!this.isOpen() && $gamePlayer.canMove() && !$gameMessage.isBusy()) {
-            return Input.isTriggered(inputKeyCallMessageReplay);
+            return Input.isTriggered(paramInputKeyCallMessageReplay);
         }
     }
     
@@ -592,7 +649,6 @@
             y -= lastDivider.height;
         }
         this._contentsHeight = Math.max(y + 2 * this.standardPadding(), this._frameHeight);
-        this.setBackgroundType(1);
         this.scrollTo(updated ? this._contentsHeight - this._frameHeight : this.scrollY);
         if (this._contentsHeight > this._frameHeight) {
             this._momentumScroller = new MomentumScroller(this._contentsHeight - this._frameHeight, this.scrollY, 100, 0.98, 5);
@@ -602,19 +658,11 @@
     };
     
     Window_MessageReplay.prototype._setChildWindowPosition = function(tagWindow) {
-        var alpha = 0;
-        if (tagWindow.baseY + tagWindow.height < this.scrollY) {
-            alpha = 0;
-        } else if (tagWindow.baseY < this.scrollY) {
-            alpha = 1 - (this.scrollY - tagWindow.baseY) / tagWindow.height;
-        } else if (tagWindow.baseY + tagWindow.height < this.scrollY + this._frameHeight) {
-            alpha = 1;
-        } else if (tagWindow.baseY < this.scrollY + this._frameHeight) {
-            alpha = (this.scrollY + this._frameHeight - tagWindow.baseY) / tagWindow.height;
-        } else {
-            alpha = 0;
-        }       
-        tagWindow.contentsOpacity = Math.round(this.openness * alpha);
+        var realFrameHeight = this._frameHeight * this.openness / 255, bias = (this._frameHeight - realFrameHeight) / 2;
+        var lowerBound = this.scrollY + bias, upperBound = this.scrollY + this._frameHeight - bias;
+        var lowerIntersect = Math.max(tagWindow.baseY, lowerBound), upperIntersect = Math.min(tagWindow.baseY + tagWindow.height, upperBound);
+        var alpha = lowerIntersect < upperIntersect ? Math.min(1, (upperIntersect - lowerIntersect) / tagWindow.height) : 0;
+        tagWindow.contentsOpacity = Math.round(255 * alpha);
         tagWindow.y = tagWindow.baseY - this.scrollY;
     }
 
@@ -651,7 +699,7 @@
     var _gameMessage_initialize = Game_Message.prototype.initialize;
     Game_Message.prototype.initialize = function() {
         _gameMessage_initialize.call(this);
-        this.messageQueue = new MessageQueue(100);
+        this.messageQueue = new MessageQueue(paramMessageReplayCapacity);
     };
 
     var _gameInterpreter_command101 = Game_Interpreter.prototype.command101;
@@ -716,7 +764,7 @@
     var _sceneMap_createAllWindows = Scene_Map.prototype.createAllWindows;
     Scene_Map.prototype.createAllWindows = function() {
         _sceneMap_createAllWindows.call(this);
-        this._messageReplayWindow = new Window_MessageReplay();
+        this._messageReplayWindow = new Window_MessageReplay(0, -24, Graphics.boxWidth, Graphics.boxHeight + 48);
         this.addWindow(this._messageReplayWindow);
     };
     
@@ -739,15 +787,14 @@
         return _gamePlayer_canMove.call(this);
     };
 
-    // Messages are too big to save
-    /*
+    if (paramEnableSave) {
         var _dataManager_makeSaveContents = DataManager.makeSaveContents;
         DataManager.makeSaveContents = function() {
             var contents = _dataManager_makeSaveContents.call(this);
             contents.messageReplay = $gameMessage.messageQueue.getData();
             return contents;
         };
-
+    
         var _dataManager_extractSaveContents = DataManager.extractSaveContents;
         DataManager.extractSaveContents = function(contents) {
             _dataManager_extractSaveContents.call(this, contents);
@@ -755,5 +802,5 @@
                 $gameMessage.messageQueue.setData(contents.messageReplay);
             }
         };
-    */
+    }
 })();
