@@ -83,6 +83,14 @@
         this._capacity = capacity + 1;
         this._internalId = 0;
     };
+    MessageQueue.prototype.actorName = function(n) {
+        var actor = n >= 1 ? $gameActors.actor(n) : null;
+        return actor ? actor.name() : '';
+    };
+    MessageQueue.prototype.partyMemberName = function(n) {
+        var actor = n >= 1 ? $gameParty.members()[n - 1] : null;
+        return actor ? actor.name() : '';
+    };
     MessageQueue.prototype._preprocess = function(message) {
         switch (message.type) {
             case 0:
@@ -176,9 +184,10 @@
     Window_MessageTag.prototype = Object.create(Window_Base.prototype);
     Window_MessageTag.prototype.constructor = Window_MessageTag;
     
-    Window_MessageTag.prototype.initialize = function(message, width, padding=2) {
+    Window_MessageTag.prototype.initialize = function(message, width, padding=0, xpadding=0) {
         this._message = message;
         this._windowPadding = padding;
+        this._xPadding = xpadding;
         Window_Base.prototype.initialize.call(this, 0, 0, width, 1);
         this.updatePadding();
         var height = this._getHeight();
@@ -273,7 +282,7 @@
     };
     
     Window_MessageTag.prototype.drawMessage = function(padding=0) {
-        var x = padding, y = padding, tx = padding, ty = padding, message = this._message;
+        var x = padding, y = 0, tx = padding, ty = 0, message = this._message;
         this.contents.clear();
         this.resetTextColor();
         this.resetFontSettings();
@@ -333,6 +342,7 @@
                 }
                 choices.forEach((element, index) => {
                     var textWidth = this.textWidth(element), color = this.textColor(0);
+                    console.log(element, textWidth);
                     if ((currentSize += textWidth + choicePadding) > maxSize) {
                         choiceLayers.push(choiceBuf);
                         choiceBuf = [];
@@ -352,12 +362,12 @@
                 choiceLayers.forEach((layer) => {
                     var totalWidth = choicePadding * (layer.length + 1), span = 0, tx = x + choicePadding;
                     layer.forEach((element) => {
-                        totalWidth += element.width + choicePadding;
+                        totalWidth += element.width;
                     });
-                    span = (this.contents.width - totalWidth - choicePadding - 2 * x) / layer.length;
+                    span = (this.contents.width - totalWidth - 2 * x) / layer.length;
                     layer.forEach((element) => {
                         this.changeTextColor(element.color);
-                        this.drawText(element.choice, tx + (element.width + span) / 2, ty, element.width, this.lineHeight(), 'left');
+                        this.drawText(element.choice, tx + span / 2, ty, element.width, this.lineHeight(), 'left');
                         tx += element.width + choicePadding + span;
                     });
                     ty += this.contents.fontSize + 8;
@@ -395,11 +405,11 @@
                 ty += this.contents.fontSize;
                 break;
         }
-        return ty + padding;
+        return ty;
     }
     
     Window_MessageTag.prototype.refresh = function() {
-        this.drawMessage(0);
+        this.drawMessage(this._xPadding);
     }
     
     Window_MessageTag.prototype._refreshFrame = function() {
@@ -551,17 +561,16 @@
                 lastDivider = this._dividerWindows[message.id];
                 delete tagWindows[message.id];
             } else {
-                var tagWindow = new Window_MessageTag(message, this.width, 18);
+                var tagWindow = new Window_MessageTag(message, this.width, 18, 18);
                 this._tagWindows[message.id] = tagWindow;
                 this.addChild(tagWindow);
                 lastDivider = new Window_MessageTag({type: 4}, this.contentsWidth(), 0);
-                lastDivider.x = this.standardPadding();
                 this._dividerWindows[message.id] = lastDivider;
                 this.addChild(lastDivider);
                 updated = true;
             }
             tagWindow.opacity = 255;
-            tagWindow.x = this.standardPadding();
+            tagWindow.x = 0;
             tagWindow.y = tagWindow.baseY = y + this.standardPadding();
             y += tagWindow.height;
             this._lastDividerId = message.id;
