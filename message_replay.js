@@ -27,6 +27,11 @@
  * @type boolean
  * @desc 消息回放窗口是否使用暗色背景
  * @default true
+ *
+ * @param choiceBlinking
+ * @type boolean
+ * @desc 选择项是否启用闪烁效果
+ * @default true
 */
 
 (function(){
@@ -36,6 +41,7 @@
     var paramMessageReplayCapacity = Number(pluginParameters['capacity'] || 100);
     var paramEnableSave = (pluginParameters['enableSave'] || 'true') === 'true';
     var paramUseDarkBackground = (pluginParameters['darkBackground'] || 'true') === 'true';
+    var paramChoiceBlinking = (pluginParameters['choiceBlinking'] || 'true') === 'true';
 
     /**
      * MomentumScroller
@@ -220,6 +226,7 @@
         this._faceReservationId = null;
         this._faceBitmap = null;
         this._loadMessageFace();
+        this.active = paramChoiceBlinking;
         this.refresh();
     }
 
@@ -404,19 +411,20 @@
                 }
                 choices.forEach((element, index) => {
                     var textWidth = this.textWidth(element), color = this.textColor(0);
+                    var isSelected = index == message.choiceIndex || (hasCancel && index == choices.length - 1 && message.isCancel);
                     console.log(element, textWidth);
                     if ((currentSize += textWidth + choicePadding) > maxSize) {
                         choiceLayers.push(choiceBuf);
                         choiceBuf = [];
                         currentSize = textWidth + choicePadding;
                     }
-                    if (index == message.choiceIndex || (hasCancel && index == choices.length - 1 && message.isCancel)) {
+                    if (isSelected) {
                         color = this.systemColor();
                     }
                     else if (hasCancel && index == choices.length - 1) {
                         color = this.textColor(8);
                     }
-                    choiceBuf.push({choice: element, color: color, width: textWidth});
+                    choiceBuf.push({choice: element, color: color, width: textWidth, isSelected: isSelected});
                 });
                 if (choiceBuf.length > 0) {
                     choiceLayers.push(choiceBuf);
@@ -430,6 +438,9 @@
                     layer.forEach((element) => {
                         this.changeTextColor(element.color);
                         this.drawText(element.choice, tx + span / 2, ty, element.width, this.lineHeight(), 'left');
+                        if (element.isSelected) {
+                            this.setCursorRect(tx, ty, element.width + span, this.lineHeight());
+                        }
                         tx += element.width + choicePadding + span;
                     });
                     ty += this.contents.fontSize + 8;
