@@ -178,17 +178,17 @@
     
     Window_MessageTag.prototype.initialize = function(message, width, padding=2) {
         this._message = message;
-        this._padding = padding;
+        this._windowPadding = padding;
         Window_Base.prototype.initialize.call(this, 0, 0, width, 1);
+        this.updatePadding();
         var height = this._getHeight();
         this.height = height + 2 * this.standardPadding();
         this.contents = new Bitmap(this.contentsWidth(), this.contentsHeight());
-        // this.setBackgroundType(0);
         this.refresh();
     }
 
     Window_MessageTag.prototype.standardPadding = function() {
-        return this._padding;
+        return this._windowPadding;
     }
     
     Window_MessageTag.prototype._getHeight = function() {
@@ -230,7 +230,7 @@
             case 1:
                 // choice
                 var choices = message.choices.slice(), hasCancel = message.cancelType < -1;
-                var choicePadding = 16, maxSize = this.contents.width - 2 * this._padding - choicePadding, choiceLayers = [], choiceBuf = [], currentSize = 0;
+                var choicePadding = 16, maxSize = this.contents.width - 2 * this._windowPadding - choicePadding, choiceLayers = [], choiceBuf = [], currentSize = 0;
                 if (hasCancel) {
                     choices.push("(取消)");
                 }
@@ -261,7 +261,14 @@
                     ty += this.contents.fontSize + 8;
                 }
                 break;
-        }
+            case 4:
+                // line
+                ty += 2;
+                break;
+            case 5:
+                // dots
+                ty += this.contents.fontSize;
+            }
         return ty;
     };
     
@@ -348,12 +355,10 @@
                         totalWidth += element.width + choicePadding;
                     });
                     span = (this.contents.width - totalWidth - choicePadding - 2 * x) / layer.length;
-                    console.log(span);
                     layer.forEach((element) => {
                         this.changeTextColor(element.color);
                         this.drawText(element.choice, tx + (element.width + span) / 2, ty, element.width, this.lineHeight(), 'left');
                         tx += element.width + choicePadding + span;
-                        console.log(tx);
                     });
                     ty += this.contents.fontSize + 8;
                 });
@@ -377,6 +382,17 @@
                     this.drawText(itemName, tx - textWidth, ty, textWidth, this.lineHeight(), 'left');
                     ty += this.contents.fontSize + 8;
                 }
+                break;
+            case 4:
+                // line
+                this.contents.fillRect(x, ty, this.contents.width - x, 2, this.textColor(7));
+                ty += 2;
+                break;
+            case 5:
+                // dots
+                var dotWidth = this.textWidth("...");
+                this.drawText("...", (this.contents.width - dotWidth) / 2, ty, dotWidth, this.contents.fontSize, "left");
+                ty += this.contents.fontSize;
                 break;
         }
         return ty + padding;
@@ -421,19 +437,17 @@
         Window_Base.prototype.initialize.call(this, x, this.baseY, width, this._frameHeight);
         this.openness = 0;
         this._tagWindows = {};
+        this._dividerWindows = {};
+        this._lastDividerId = null;
+        this._dotWindow = new Window_MessageTag({type: 5}, this.contentsWidth(), 0);
+        this._dotWindow.x = this.standardPadding();
         this.scrollY = 0;
-        this._height = 0;
+        this._contentsHeight = 0;
         this._momentumScroller = null;
+        this.addChild(this._dotWindow);
         this.refresh();
     };
 
-    Window_MessageReplay.prototype._updateContents = function() {
-        Window.prototype._updateContents.apply(this);
-        if (this.isOpening() || this.isClosing()) {
-            this._windowContentsSprite.visible = true;
-        }
-    };
-    
     Window_MessageReplay.prototype.updateOpen = function() {
         if (this._opening) {
             this.openness += 16;
@@ -446,10 +460,7 @@
     
     Window_MessageReplay.prototype.update = function() {
         if (this.isOpening() || this.isClosing()) {
-            for (var id in this._tagWindows) {
-                var tagWindow = this._tagWindows[id];
-                tagWindow.contentsOpacity = this.openness;
-            }
+            this._setWindowsPosition();
         }
         Window_Base.prototype.update.call(this);
         while (!this.isOpening() && !this.isClosing()) {
@@ -519,22 +530,8 @@
         }
     }
     
-    Window_MessageReplay.prototype.drawDividerLine = function(y, x_padding=2, y_padding=2) {
-        var left = x_padding, right = this.contents.width - x_padding;
-        this.contents.fillRect(left, y + y_padding, right - left, 2, this.textColor(7));
-        return y + 2 + 2 * y_padding;
-    };
-    
-    Window_MessageReplay.prototype.drawDots = function(y, x_padding=2, y_padding=2) {
-        var left = x_padding, right = this.contents.width - x_padding;
-        var dotWidth = this.textWidth("...");
-        this.drawText("...", (left + right - dotWidth) / 2, y + y_padding, dotWidth, this.contents.fontSize, "left");
-        return y + this.contents.fontSize + 2 * y_padding;
-    }
-    
     Window_MessageReplay.prototype.refresh = function() {
-        this.contents.clear();
-        var y = 0, first = true, tagWindows = {}, contentsCommand = [], updated = false;
+        var y = 0, first = true, tagWindows = {}, contentsCommand = [], updated = false, lastDivider = null;
         for (var id in this._tagWindows) {
             tagWindows[id] = this._tagWindows[id];
         }
@@ -542,76 +539,100 @@
             if (first) {
                 first = false;
                 if ($gameMessage.messageQueue.isFull()) {
-                    contentsCommand.push({type: "dots", params: [y, 2, 2]});
-                    y = this.drawDots(y, 2, 2);
+                    this._dotWindow.visible = true;
+                    this._dotWindow.baseY = y + this.standardPadding();
+                    y += this._dotWindow.height;
+                } else {
+                    this._dotWindow.visible = false;
                 }
-            } else {
-                contentsCommand.push({type: "line", params: [y, 2, 2]});
-                y = this.drawDividerLine(y, 2, 2);
             }
             if (message.id in tagWindows) {
                 var tagWindow = tagWindows[message.id];
+                lastDivider = this._dividerWindows[message.id];
                 delete tagWindows[message.id];
             } else {
-                var tagWindow = new Window_MessageTag(message, this.contents.width, 0);
+                var tagWindow = new Window_MessageTag(message, this.width, 18);
                 this._tagWindows[message.id] = tagWindow;
                 this.addChild(tagWindow);
+                lastDivider = new Window_MessageTag({type: 4}, this.contentsWidth(), 0);
+                lastDivider.x = this.standardPadding();
+                this._dividerWindows[message.id] = lastDivider;
+                this.addChild(lastDivider);
                 updated = true;
             }
             tagWindow.opacity = 255;
             tagWindow.x = this.standardPadding();
             tagWindow.y = tagWindow.baseY = y + this.standardPadding();
             y += tagWindow.height;
+            this._lastDividerId = message.id;
+            lastDivider.opacity = 255;
+            lastDivider.x = this.standardPadding();
+            lastDivider.y = lastDivider.baseY = y + this.standardPadding();
+            y += lastDivider.height;
         });
         for (var id in tagWindows) {
-            var tagWindow = tagWindows[id];
+            var tagWindow = tagWindows[id], dividerWindow = this._dividerWindows[id];
             this.removeChild(tagWindow);
+            this.removeChild(dividerWindow);
             delete this._tagWindows[id];
+            delete this._dividerWindows[id];
             updated = true;
         }
-        this._height = Math.max(y + 2 * this.standardPadding(), this._frameHeight);
-        this.contents = new Bitmap(this.contentsWidth(), this.contentsHeight());
-        contentsCommand.forEach((cmd) => {
-            switch (cmd.type) {
-                case "line":
-                    this.drawDividerLine.apply(this, cmd.params);
-                    break;
-                case "dots":
-                    this.drawDots.apply(this, cmd.params);
-                    break;
-            }
-        });
+        if (lastDivider) {
+            lastDivider.opacity = 0;
+            y -= lastDivider.height;
+        }
+        this._contentsHeight = Math.max(y + 2 * this.standardPadding(), this._frameHeight);
         this.setBackgroundType(1);
-        this.scrollTo(updated ? this._height - this._frameHeight : this.scrollY);
-        if (this._height > this._frameHeight) {
-            this._momentumScroller = new MomentumScroller(this._height - this._frameHeight, this.scrollY, 100, 0.98, 5);
+        this.scrollTo(updated ? this._contentsHeight - this._frameHeight : this.scrollY);
+        if (this._contentsHeight > this._frameHeight) {
+            this._momentumScroller = new MomentumScroller(this._contentsHeight - this._frameHeight, this.scrollY, 100, 0.98, 5);
         } else {
             this._momentumScroller = null;
         }
     };
     
+    Window_MessageReplay.prototype._setChildWindowPosition = function(tagWindow) {
+        var alpha = 0;
+        if (tagWindow.baseY + tagWindow.height < this.scrollY) {
+            alpha = 0;
+        } else if (tagWindow.baseY < this.scrollY) {
+            alpha = 1 - (this.scrollY - tagWindow.baseY) / tagWindow.height;
+        } else if (tagWindow.baseY + tagWindow.height < this.scrollY + this._frameHeight) {
+            alpha = 1;
+        } else if (tagWindow.baseY < this.scrollY + this._frameHeight) {
+            alpha = (this.scrollY + this._frameHeight - tagWindow.baseY) / tagWindow.height;
+        } else {
+            alpha = 0;
+        }       
+        tagWindow.contentsOpacity = Math.round(this.openness * alpha);
+        tagWindow.y = tagWindow.baseY - this.scrollY;
+    }
+
     Window_MessageReplay.prototype._setWindowsPosition = function() {
-        if (this._height <= this._frameHeight) {
+        if (this._contentsHeight <= this._frameHeight) {
             this.scrollY = 0;
-            this.y = this.baseY;
             for (var id in this._tagWindows) {
-                var tagWindow = this._tagWindows[id];
+                var tagWindow = this._tagWindows[id], dividerWindow = this._dividerWindows[id];
                 tagWindow.y = tagWindow.baseY;
+                dividerWindow.y = dividerWindow.baseY;
             }
         } else {
-            var maxScrollY = this._height - this._frameHeight;
+            var maxScrollY = this._contentsHeight - this._frameHeight;
             this.scrollY = Math.max(0, Math.min(this.scrollY, maxScrollY));
-            this.y = this.baseY - this.scrollY;
+            this._setChildWindowPosition(this._dotWindow);
+            for (var id in this._tagWindows) {
+                var tagWindow = this._tagWindows[id], dividerWindow = this._dividerWindows[id];
+                this._setChildWindowPosition(tagWindow);
+                if (dividerWindow && id != this._lastDividerId) {
+                    this._setChildWindowPosition(dividerWindow);
+                }
+            }
         }
     };
     
     Window_MessageReplay.prototype.scrollTo = function(position) {
-        if (this._height <= this._frameHeight) {
-            this.scrollY = 0;
-        } else {
-            var maxScrollY = this._height - this._frameHeight;
-            this.scrollY = Math.max(0, Math.min(position, maxScrollY));
-        }
+        this.scrollY = position;
         this._setWindowsPosition();
     };
     
