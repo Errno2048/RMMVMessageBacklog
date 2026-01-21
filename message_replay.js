@@ -418,7 +418,6 @@
                 choices.forEach((element, index) => {
                     var textWidth = this.textWidth(element), color = this.textColor(0);
                     var isSelected = index == message.choiceIndex || (hasCancel && index == choices.length - 1 && message.isCancel);
-                    console.log(element, textWidth);
                     if ((currentSize += textWidth + choicePadding) > maxSize) {
                         choiceLayers.push(choiceBuf);
                         choiceBuf = [];
